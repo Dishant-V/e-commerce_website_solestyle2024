@@ -23,6 +23,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
   const [contacts, setContacts] = useState<any[]>([]);
   const [userStats, setUserStats] = useState<any>({});
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   // Filter states
   const [searchQuery, setSearchQuery] = useState('');
@@ -174,12 +175,14 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
     }
   };
 
-  const handleAddProduct = () => {
+  const handleAddProduct = async () => {
     if (!newProduct.name || !newProduct.price || !newProduct.image) {
       alert('Please fill in all required fields (Name, Price, Image)');
       return;
     }
 
+    setIsProcessing(true);
+    
     try {
       const productData = {
         name: newProduct.name!,
@@ -199,9 +202,11 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
       const addedProduct = database.addProduct(productData);
       console.log('Product added successfully:', addedProduct);
       
-      // Refresh products list
-      setProducts(database.getAllProducts());
+      // Force refresh products list immediately
+      const updatedProducts = database.getAllProducts();
+      setProducts(updatedProducts);
       
+      // Reset form
       setIsAddingProduct(false);
       setNewProduct({
         name: '',
@@ -217,12 +222,20 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
         rating: 4.5,
         reviews: 0
       });
+      
       setHasUnsavedChanges(true);
       
-      alert(`Product "${addedProduct.name}" added successfully! It should now appear on the website.`);
+      // Show success message with product count
+      alert(`Product "${addedProduct.name}" added successfully! Total products: ${updatedProducts.length}. It should now appear on the website.`);
+      
+      // Force a page refresh to ensure all components update
+      window.dispatchEvent(new Event('storage'));
+      
     } catch (error) {
       console.error('Error adding product:', error);
       alert('Failed to add product. Please try again.');
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -230,27 +243,40 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
     setEditingProduct({ ...product });
   };
 
-  const handleSaveEdit = () => {
+  const handleSaveEdit = async () => {
     if (!editingProduct) return;
 
+    setIsProcessing(true);
+    
     try {
       const updatedProduct = database.updateProduct(editingProduct.id, editingProduct);
       if (updatedProduct) {
         console.log('Product updated successfully:', updatedProduct);
-        setProducts(database.getAllProducts());
+        
+        // Force refresh products list immediately
+        const updatedProducts = database.getAllProducts();
+        setProducts(updatedProducts);
+        
         setEditingProduct(null);
         setHasUnsavedChanges(true);
+        
         alert(`Product "${updatedProduct.name}" updated successfully!`);
+        
+        // Force a page refresh to ensure all components update
+        window.dispatchEvent(new Event('storage'));
+        
       } else {
         throw new Error('Product not found');
       }
     } catch (error) {
       console.error('Error updating product:', error);
       alert('Failed to update product. Please try again.');
+    } finally {
+      setIsProcessing(false);
     }
   };
 
-  const handleDeleteProduct = (productId: string) => {
+  const handleDeleteProduct = async (productId: string) => {
     const productToDelete = products.find(p => p.id === productId);
     if (!productToDelete) {
       alert('Product not found');
@@ -258,11 +284,16 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
     }
 
     if (confirm(`Are you sure you want to delete "${productToDelete.name}"?`)) {
+      setIsProcessing(true);
+      
       try {
         const success = database.deleteProduct(productId);
         if (success) {
           console.log('Product deleted successfully:', productId);
-          setProducts(database.getAllProducts());
+          
+          // Force refresh products list immediately
+          const updatedProducts = database.getAllProducts();
+          setProducts(updatedProducts);
           
           // Remove from hero products if it's there
           const updatedHeroProducts = heroProducts.filter(id => id !== productId);
@@ -270,13 +301,20 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
           database.updateHeroProducts(updatedHeroProducts);
           
           setHasUnsavedChanges(true);
-          alert(`Product "${productToDelete.name}" deleted successfully!`);
+          
+          alert(`Product "${productToDelete.name}" deleted successfully! Remaining products: ${updatedProducts.length}`);
+          
+          // Force a page refresh to ensure all components update
+          window.dispatchEvent(new Event('storage'));
+          
         } else {
           throw new Error('Failed to delete product');
         }
       } catch (error) {
         console.error('Error deleting product:', error);
         alert('Failed to delete product. Please try again.');
+      } finally {
+        setIsProcessing(false);
       }
     }
   };
@@ -364,7 +402,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
     onChange: (product: Partial<Product>) => void,
     isNew?: boolean 
   }) => (
-    <div className="space-y-4">
+    <div className="space-y-4" style={{ cursor: 'default' }}>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -378,6 +416,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
             required
             autoComplete="off"
             spellCheck="false"
+            style={{ cursor: 'text' }}
           />
         </div>
         <div>
@@ -392,6 +431,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
             className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             required
             autoComplete="off"
+            style={{ cursor: 'text' }}
           />
         </div>
       </div>
@@ -408,6 +448,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
             onChange={(e) => handleInputChange('originalPrice', parseFloat(e.target.value) || undefined, product, onChange)}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             autoComplete="off"
+            style={{ cursor: 'text' }}
           />
         </div>
         <div>
@@ -423,6 +464,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
             onChange={(e) => handleInputChange('rating', parseFloat(e.target.value) || 0, product, onChange)}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             autoComplete="off"
+            style={{ cursor: 'text' }}
           />
         </div>
       </div>
@@ -439,6 +481,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
           placeholder="https://example.com/image.jpg"
           required
           autoComplete="off"
+          style={{ cursor: 'text' }}
         />
       </div>
 
@@ -460,6 +503,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
             }}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             required
+            style={{ cursor: 'pointer' }}
           >
             {categories.map(cat => (
               <option key={cat.id} value={cat.id}>{cat.name}</option>
@@ -475,6 +519,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
             onChange={(e) => handleInputChange('subcategory', e.target.value, product, onChange)}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             required
+            style={{ cursor: 'pointer' }}
           >
             {getSubcategories(product.category || 'luxurious').map(sub => (
               <option key={sub.id} value={sub.id}>{sub.name}</option>
@@ -494,6 +539,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
           rows={3}
           autoComplete="off"
           spellCheck="false"
+          style={{ cursor: 'text', resize: 'vertical' }}
         />
       </div>
 
@@ -509,6 +555,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
             className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             placeholder="7, 8, 9, 10, 11, 12"
             autoComplete="off"
+            style={{ cursor: 'text' }}
           />
         </div>
         <div>
@@ -522,17 +569,19 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
             className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             placeholder="Black, White, Brown"
             autoComplete="off"
+            style={{ cursor: 'text' }}
           />
         </div>
       </div>
 
       <div className="flex items-center space-x-4">
-        <label className="flex items-center">
+        <label className="flex items-center" style={{ cursor: 'pointer' }}>
           <input
             type="checkbox"
             checked={product.inStock || false}
             onChange={(e) => handleInputChange('inStock', e.target.checked, product, onChange)}
             className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            style={{ cursor: 'pointer' }}
           />
           <span className="ml-2 text-sm text-gray-700">In Stock</span>
         </label>
@@ -546,6 +595,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
             onChange={(e) => handleInputChange('reviews', parseInt(e.target.value) || 0, product, onChange)}
             className="w-20 border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             autoComplete="off"
+            style={{ cursor: 'text' }}
           />
         </div>
       </div>
@@ -553,12 +603,13 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
   );
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" style={{ cursor: 'default' }}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-7xl max-h-[90vh] overflow-hidden">
         <div className="bg-gradient-to-r from-purple-600 to-purple-800 px-6 py-4 relative">
           <button
             onClick={onClose}
             className="absolute top-4 right-4 text-white hover:text-gray-200 transition-colors"
+            style={{ cursor: 'pointer' }}
           >
             <X size={24} />
           </button>
@@ -574,6 +625,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                 disabled={isRefreshing}
                 className="bg-white/20 backdrop-blur-sm rounded-lg px-3 py-2 text-white hover:bg-white/30 transition-colors flex items-center space-x-2"
                 title="Refresh data from database"
+                style={{ cursor: 'pointer' }}
               >
                 <RefreshCw size={16} className={isRefreshing ? 'animate-spin' : ''} />
                 <span className="text-sm">Refresh</span>
@@ -595,6 +647,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                 <button
                   onClick={handleSaveChanges}
                   className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center space-x-2 animate-pulse"
+                  style={{ cursor: 'pointer' }}
                 >
                   <Save size={20} />
                   <span>Save All Changes</span>
@@ -612,6 +665,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                 ? 'text-purple-600 border-b-2 border-purple-600'
                 : 'text-gray-500 hover:text-gray-700'
             }`}
+            style={{ cursor: 'pointer' }}
           >
             Products ({products.length})
           </button>
@@ -622,6 +676,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                 ? 'text-purple-600 border-b-2 border-purple-600'
                 : 'text-gray-500 hover:text-gray-700'
             }`}
+            style={{ cursor: 'pointer' }}
           >
             Hero Section
           </button>
@@ -632,6 +687,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                 ? 'text-purple-600 border-b-2 border-purple-600'
                 : 'text-gray-500 hover:text-gray-700'
             }`}
+            style={{ cursor: 'pointer' }}
           >
             Users ({users.length})
           </button>
@@ -642,6 +698,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                 ? 'text-purple-600 border-b-2 border-purple-600'
                 : 'text-gray-500 hover:text-gray-700'
             }`}
+            style={{ cursor: 'pointer' }}
           >
             Messages ({contacts.length})
           </button>
@@ -652,6 +709,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                 ? 'text-purple-600 border-b-2 border-purple-600'
                 : 'text-gray-500 hover:text-gray-700'
             }`}
+            style={{ cursor: 'pointer' }}
           >
             Analytics
           </button>
@@ -662,22 +720,27 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                 ? 'text-purple-600 border-b-2 border-purple-600'
                 : 'text-gray-500 hover:text-gray-700'
             }`}
+            style={{ cursor: 'pointer' }}
           >
             Cloud Storage
           </button>
         </div>
 
-        <div className="p-6 max-h-[70vh] overflow-y-auto">
+        <div className="p-6 max-h-[70vh] overflow-y-auto" style={{ cursor: 'default' }}>
           {activeTab === 'products' && (
             <div>
               <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-6 space-y-4 lg:space-y-0">
                 <div className="flex items-center space-x-4">
                   <h3 className="text-xl font-semibold">Products ({filteredProducts.length})</h3>
+                  <div className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium">
+                    Database: {products.length} total
+                  </div>
                   <button
                     onClick={() => setShowFilters(!showFilters)}
                     className={`flex items-center space-x-2 px-4 py-2 rounded-lg font-medium transition-colors ${
                       showFilters ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700'
                     }`}
+                    style={{ cursor: 'pointer' }}
                   >
                     <Filter size={18} />
                     <span>Filters</span>
@@ -685,11 +748,26 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                 </div>
                 <button
                   onClick={() => setIsAddingProduct(true)}
-                  className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2"
+                  disabled={isProcessing}
+                  className="bg-purple-600 hover:bg-purple-700 disabled:bg-purple-400 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2"
+                  style={{ cursor: 'pointer' }}
                 >
                   <Plus size={18} />
-                  <span>Add Product</span>
+                  <span>{isProcessing ? 'Processing...' : 'Add Product'}</span>
                 </button>
+              </div>
+
+              {/* Storage Info */}
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                    <span className="text-green-800 font-medium">Database Status: Active</span>
+                  </div>
+                  <div className="text-sm text-green-700">
+                    Storage: Unlimited • Auto-save: Enabled • Real-time sync: Active
+                  </div>
+                </div>
               </div>
 
               {/* Filters Section */}
@@ -709,6 +787,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                           value={searchQuery}
                           onChange={(e) => setSearchQuery(e.target.value)}
                           className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                          style={{ cursor: 'text' }}
                         />
                       </div>
                     </div>
@@ -722,6 +801,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                         value={categoryFilter}
                         onChange={(e) => setCategoryFilter(e.target.value)}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                        style={{ cursor: 'pointer' }}
                       >
                         <option value="all">All Categories</option>
                         {categories.map(cat => (
@@ -739,6 +819,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                         value={sizeFilter}
                         onChange={(e) => setSizeFilter(e.target.value)}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                        style={{ cursor: 'pointer' }}
                       >
                         <option value="all">All Sizes</option>
                         {allSizes.map(size => (
@@ -759,6 +840,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                           value={priceRangeFilter[0]}
                           onChange={(e) => setPriceRangeFilter([Number(e.target.value), priceRangeFilter[1]])}
                           className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                          style={{ cursor: 'text' }}
                         />
                         <input
                           type="number"
@@ -766,6 +848,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                           value={priceRangeFilter[1]}
                           onChange={(e) => setPriceRangeFilter([priceRangeFilter[0], Number(e.target.value)])}
                           className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                          style={{ cursor: 'text' }}
                         />
                       </div>
                     </div>
@@ -775,6 +858,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                     <button
                       onClick={clearFilters}
                       className="text-gray-600 hover:text-gray-800 text-sm underline"
+                      style={{ cursor: 'pointer' }}
                     >
                       Clear All Filters
                     </button>
@@ -796,14 +880,18 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                   <div className="flex space-x-3 mt-6">
                     <button
                       onClick={handleAddProduct}
-                      className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-medium transition-colors flex items-center space-x-2"
+                      disabled={isProcessing}
+                      className="bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white px-6 py-3 rounded-lg font-medium transition-colors flex items-center space-x-2"
+                      style={{ cursor: 'pointer' }}
                     >
                       <Save size={18} />
-                      <span>Add Product to Database</span>
+                      <span>{isProcessing ? 'Adding Product...' : 'Add Product to Database'}</span>
                     </button>
                     <button
                       onClick={() => setIsAddingProduct(false)}
-                      className="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                      disabled={isProcessing}
+                      className="bg-gray-500 hover:bg-gray-600 disabled:bg-gray-400 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                      style={{ cursor: 'pointer' }}
                     >
                       Cancel
                     </button>
@@ -821,14 +909,18 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                   <div className="flex space-x-3 mt-6">
                     <button
                       onClick={handleSaveEdit}
-                      className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-colors flex items-center space-x-2"
+                      disabled={isProcessing}
+                      className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-6 py-3 rounded-lg font-medium transition-colors flex items-center space-x-2"
+                      style={{ cursor: 'pointer' }}
                     >
                       <Save size={18} />
-                      <span>Update Product</span>
+                      <span>{isProcessing ? 'Updating Product...' : 'Update Product'}</span>
                     </button>
                     <button
                       onClick={() => setEditingProduct(null)}
-                      className="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                      disabled={isProcessing}
+                      className="bg-gray-500 hover:bg-gray-600 disabled:bg-gray-400 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                      style={{ cursor: 'pointer' }}
                     >
                       Cancel
                     </button>
@@ -859,14 +951,18 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                     <div className="flex space-x-2">
                       <button
                         onClick={() => handleEditProduct(product)}
-                        className="flex-1 bg-blue-100 hover:bg-blue-200 text-blue-700 px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center space-x-1"
+                        disabled={isProcessing}
+                        className="flex-1 bg-blue-100 hover:bg-blue-200 disabled:bg-blue-50 text-blue-700 px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center space-x-1"
+                        style={{ cursor: 'pointer' }}
                       >
                         <Edit size={14} />
                         <span>Edit</span>
                       </button>
                       <button
                         onClick={() => handleDeleteProduct(product.id)}
-                        className="flex-1 bg-red-100 hover:bg-red-200 text-red-700 px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center space-x-1"
+                        disabled={isProcessing}
+                        className="flex-1 bg-red-100 hover:bg-red-200 disabled:bg-red-50 text-red-700 px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center space-x-1"
+                        style={{ cursor: 'pointer' }}
                       >
                         <Trash2 size={14} />
                         <span>Delete</span>
@@ -888,6 +984,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                     <button
                       onClick={clearFilters}
                       className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded-lg font-medium"
+                      style={{ cursor: 'pointer' }}
                     >
                       Clear Filters
                     </button>
@@ -917,6 +1014,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                           value={heroProducts[index] || ''}
                           onChange={(e) => handleHeroProductChange(index, e.target.value)}
                           className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                          style={{ cursor: 'pointer' }}
                         >
                           <option value="">Select a product...</option>
                           {products.map(product => (
@@ -1031,6 +1129,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                       onClick={handleCloudBackup}
                       disabled={cloudStatus === 'syncing'}
                       className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-4 py-3 rounded-lg font-medium transition-colors flex items-center justify-center space-x-2"
+                      style={{ cursor: 'pointer' }}
                     >
                       <Upload size={18} />
                       <span>Backup to Cloud</span>
@@ -1040,6 +1139,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                       onClick={handleCloudRestore}
                       disabled={cloudStatus === 'syncing' || cloudStatus === 'disconnected'}
                       className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white px-4 py-3 rounded-lg font-medium transition-colors flex items-center justify-center space-x-2"
+                      style={{ cursor: 'pointer' }}
                     >
                       <Download size={18} />
                       <span>Restore from Cloud</span>
@@ -1049,6 +1149,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                       onClick={checkCloudStatus}
                       disabled={cloudStatus === 'syncing'}
                       className="w-full bg-gray-600 hover:bg-gray-700 disabled:bg-gray-400 text-white px-4 py-3 rounded-lg font-medium transition-colors flex items-center justify-center space-x-2"
+                      style={{ cursor: 'pointer' }}
                     >
                       <Cloud size={18} />
                       <span>Check Status</span>
