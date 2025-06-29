@@ -1,37 +1,27 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit, Trash2, Save, X, Upload, Star, Eye, Filter, Search, Cloud, Download, Users, MessageSquare, Settings, Database } from 'lucide-react';
+import { Plus, Edit, Trash2, Save, X, Upload, Star, Eye, Filter, Search, Cloud, CloudOff, Download, Users, MessageSquare, BarChart3, Settings } from 'lucide-react';
 import { Product, Category } from '../types';
 import { categories } from '../data/products';
 import { database } from '../utils/database';
-import { cloudStorage } from '../utils/cloudStorage';
-import { userDatabase } from '../utils/userDatabase';
+import { cloudStorage, uploadToCloud, downloadFromCloud, hasCloudBackup, getCloudBackupInfo } from '../utils/cloudStorage';
+import { userDatabase, getAllUsers, getUserStats } from '../utils/userDatabase';
 
 interface AdminPanelProps {
   onClose: () => void;
 }
 
-interface ContactMessage {
-  id: string;
-  name: string;
-  email: string;
-  subject: string;
-  message: string;
-  timestamp: string;
-  read: boolean;
-}
-
 const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
   const [products, setProducts] = useState<Product[]>([]);
-  const [activeTab, setActiveTab] = useState<'products' | 'hero' | 'cloud' | 'users' | 'contacts'>('products');
+  const [activeTab, setActiveTab] = useState<'products' | 'hero' | 'users' | 'contacts' | 'analytics' | 'cloud'>('products');
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [isAddingProduct, setIsAddingProduct] = useState(false);
   const [heroProducts, setHeroProducts] = useState<string[]>(['1', '2', '3']);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-  const [contacts, setContacts] = useState<ContactMessage[]>([]);
-  const [users, setUsers] = useState<any[]>([]);
   const [cloudStatus, setCloudStatus] = useState<'connected' | 'disconnected' | 'syncing'>('disconnected');
-  const [autoBackup, setAutoBackup] = useState(false);
-  const [lastBackup, setLastBackup] = useState<string | null>(null);
+  const [cloudBackupInfo, setCloudBackupInfo] = useState<any>(null);
+  const [users, setUsers] = useState<any[]>([]);
+  const [contacts, setContacts] = useState<any[]>([]);
+  const [userStats, setUserStats] = useState<any>({});
 
   // Filter states
   const [searchQuery, setSearchQuery] = useState('');
@@ -40,23 +30,22 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
   const [sizeFilter, setSizeFilter] = useState<string>('all');
   const [showFilters, setShowFilters] = useState(false);
 
-  // New product form with proper state management
-  const [newProduct, setNewProduct] = useState({
+  const [newProduct, setNewProduct] = useState<Partial<Product>>({
     name: '',
-    price: '',
-    originalPrice: '',
+    price: 0,
+    originalPrice: 0,
     image: '',
     category: 'luxurious',
     subcategory: 'luxury-formal',
     description: '',
-    sizes: '',
-    colors: '',
+    sizes: [],
+    colors: [],
     inStock: true,
-    rating: '4.5',
-    reviews: '0'
+    rating: 4.5,
+    reviews: 0
   });
 
-  // Load data on component mount
+  // Load data on mount
   useEffect(() => {
     loadAllData();
     checkCloudStatus();
@@ -71,98 +60,146 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
     const heroIds = database.getHeroProducts();
     setHeroProducts(heroIds);
 
+    // Load users
+    const allUsers = getAllUsers();
+    setUsers(allUsers);
+
+    // Load user stats
+    const stats = getUserStats();
+    setUserStats(stats);
+
     // Load contacts
     const savedContacts = JSON.parse(localStorage.getItem('solestyle_contacts') || '[]');
     setContacts(savedContacts);
-
-    // Load users
-    const allUsers = userDatabase.getAllUsers();
-    setUsers(allUsers);
   };
 
   const checkCloudStatus = async () => {
     try {
-      const hasBackup = await cloudStorage.hasCloudBackup();
-      setCloudStatus(hasBackup ? 'connected' : 'disconnected');
+      setCloudStatus('syncing');
+      const hasBackup = await hasCloudBackup();
+      const backupInfo = await getCloudBackupInfo();
       
-      if (hasBackup) {
-        const backupInfo = await cloudStorage.getCloudBackupInfo();
-        if (backupInfo) {
-          setLastBackup(backupInfo.lastModified);
-        }
-      }
+      setCloudBackupInfo(backupInfo);
+      setCloudStatus(hasBackup ? 'connected' : 'disconnected');
     } catch (error) {
       console.error('Error checking cloud status:', error);
       setCloudStatus('disconnected');
     }
   };
 
-  // Handle input changes for new product form
-  const handleNewProductChange = (field: string, value: any) => {
-    setNewProduct(prev => ({
-      ...prev,
-      [field]: value
-    }));
+  const handleCloudBackup = async () => {
+    try {
+      setCloudStatus('syncing');
+      
+      const cloudData = {
+        products: database.getAllProducts(),
+        heroProducts: database.getHeroProducts(),
+        contacts: JSON.parse(localStorage.getItem('solestyle_contacts') || '[]'),
+        users: userDatabase.exportUserData().users,
+        timestamp: new Date().toISOString()
+      };
+
+      await uploadToCloud(cloudData);
+      await checkCloudStatus();
+      alert('Data successfully backed up to cloud!');
+    } catch (error) {
+      console.error('Cloud backup failed:', error);
+      setCloudStatus('disconnected');
+      alert('Cloud backup failed. Please try again.');
+    }
   };
 
-  // Handle input changes for editing product
-  const handleEditProductChange = (field: string, value: any) => {
-    if (editingProduct) {
-      setEditingProduct(prev => prev ? ({
-        ...prev,
-        [field]: value
-      }) : null);
+  const handleCloudRestore = async () => {
+    if (!confirm('This will replace all current data with cloud backup. Are you sure?')) {
+      return;
+    }
+
+    try {
+      setCloudStatus('syncing');
+      
+      const cloudData = await downloadFromCloud();
+      if (!cloudData) {
+        throw new Error('No cloud backup found');
+      }
+
+      // Restore products
+      if (cloudData.products) {
+        // Clear current products and import from cloud
+        localStorage.setItem('solestyle_database', JSON.stringify({
+          products: cloudData.products,
+          heroProducts: cloudData.heroProducts || [],
+          lastUpdated: cloudData.timestamp
+        }));
+      }
+
+      // Restore users
+      if (cloudData.users) {
+        userDatabase.importUserData({ users: cloudData.users });
+      }
+
+      // Restore contacts
+      if (cloudData.contacts) {
+        localStorage.setItem('solestyle_contacts', JSON.stringify(cloudData.contacts));
+      }
+
+      // Reload all data
+      loadAllData();
+      await checkCloudStatus();
+      
+      alert('Data successfully restored from cloud backup!');
+    } catch (error) {
+      console.error('Cloud restore failed:', error);
+      setCloudStatus('disconnected');
+      alert('Cloud restore failed: ' + error.message);
     }
   };
 
   const handleAddProduct = () => {
-    if (!newProduct.name.trim() || !newProduct.price || !newProduct.image.trim()) {
+    if (!newProduct.name || !newProduct.price || !newProduct.image) {
       alert('Please fill in all required fields (Name, Price, Image)');
       return;
     }
 
     try {
       const productData = {
-        name: newProduct.name.trim(),
-        price: parseFloat(newProduct.price) || 0,
-        originalPrice: newProduct.originalPrice ? parseFloat(newProduct.originalPrice) : undefined,
-        image: newProduct.image.trim(),
-        category: newProduct.category,
-        subcategory: newProduct.subcategory,
-        description: newProduct.description.trim(),
-        sizes: newProduct.sizes.split(',').map(s => s.trim()).filter(s => s),
-        colors: newProduct.colors.split(',').map(c => c.trim()).filter(c => c),
-        inStock: newProduct.inStock,
-        rating: parseFloat(newProduct.rating) || 4.5,
-        reviews: parseInt(newProduct.reviews) || 0
+        name: newProduct.name!,
+        price: newProduct.price!,
+        originalPrice: newProduct.originalPrice,
+        image: newProduct.image!,
+        category: newProduct.category!,
+        subcategory: newProduct.subcategory!,
+        description: newProduct.description!,
+        sizes: newProduct.sizes!,
+        colors: newProduct.colors!,
+        inStock: newProduct.inStock!,
+        rating: newProduct.rating!,
+        reviews: newProduct.reviews!
       };
 
       const addedProduct = database.addProduct(productData);
       setProducts(database.getAllProducts());
       
-      // Reset form
+      setIsAddingProduct(false);
       setNewProduct({
         name: '',
-        price: '',
-        originalPrice: '',
+        price: 0,
+        originalPrice: 0,
         image: '',
         category: 'luxurious',
         subcategory: 'luxury-formal',
         description: '',
-        sizes: '',
-        colors: '',
+        sizes: [],
+        colors: [],
         inStock: true,
-        rating: '4.5',
-        reviews: '0'
+        rating: 4.5,
+        reviews: 0
       });
-      
-      setIsAddingProduct(false);
       setHasUnsavedChanges(true);
       
       alert('Product added successfully!');
     } catch (error) {
       console.error('Error adding product:', error);
-      alert('Error adding product. Please try again.');
+      alert('Failed to add product. Please try again.');
     }
   };
 
@@ -174,36 +211,34 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
     if (!editingProduct) return;
 
     try {
-      const updatedProduct = database.updateProduct(editingProduct.id, editingProduct);
-      if (updatedProduct) {
-        setProducts(database.getAllProducts());
-        setEditingProduct(null);
-        setHasUnsavedChanges(true);
-        alert('Product updated successfully!');
-      } else {
-        alert('Error updating product. Please try again.');
-      }
+      database.updateProduct(editingProduct.id, editingProduct);
+      setProducts(database.getAllProducts());
+      setEditingProduct(null);
+      setHasUnsavedChanges(true);
+      
+      alert('Product updated successfully!');
     } catch (error) {
       console.error('Error updating product:', error);
-      alert('Error updating product. Please try again.');
+      alert('Failed to update product. Please try again.');
     }
   };
 
   const handleDeleteProduct = (productId: string) => {
     if (confirm('Are you sure you want to delete this product?')) {
       try {
-        const deleted = database.deleteProduct(productId);
-        if (deleted) {
-          setProducts(database.getAllProducts());
-          setHeroProducts(database.getHeroProducts());
-          setHasUnsavedChanges(true);
-          alert('Product deleted successfully!');
-        } else {
-          alert('Error deleting product. Please try again.');
-        }
+        database.deleteProduct(productId);
+        setProducts(database.getAllProducts());
+        
+        // Remove from hero products if it's there
+        const updatedHeroProducts = heroProducts.filter(id => id !== productId);
+        setHeroProducts(updatedHeroProducts);
+        database.updateHeroProducts(updatedHeroProducts);
+        
+        setHasUnsavedChanges(true);
+        alert('Product deleted successfully!');
       } catch (error) {
         console.error('Error deleting product:', error);
-        alert('Error deleting product. Please try again.');
+        alert('Failed to delete product. Please try again.');
       }
     }
   };
@@ -216,136 +251,21 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
     setHasUnsavedChanges(true);
   };
 
-  // Cloud storage functions
-  const handleCloudUpload = async () => {
+  const handleSaveChanges = async () => {
     try {
-      setCloudStatus('syncing');
-      
-      const cloudData = {
-        products: database.getAllProducts(),
-        heroProducts: database.getHeroProducts(),
-        contacts: JSON.parse(localStorage.getItem('solestyle_contacts') || '[]'),
-        users: userDatabase.getAllUsers(),
-        timestamp: new Date().toISOString()
-      };
-
-      await cloudStorage.uploadToCloud(cloudData);
-      
-      setCloudStatus('connected');
-      setLastBackup(new Date().toISOString());
+      // All changes are already saved to database automatically
       setHasUnsavedChanges(false);
       
-      alert('Data successfully backed up to cloud!');
-    } catch (error) {
-      console.error('Cloud upload error:', error);
-      setCloudStatus('disconnected');
-      alert('Failed to upload to cloud. Please try again.');
-    }
-  };
-
-  const handleCloudDownload = async () => {
-    if (!confirm('This will replace all current data with cloud backup. Are you sure?')) {
-      return;
-    }
-
-    try {
-      setCloudStatus('syncing');
+      // Optionally trigger cloud backup
+      if (cloudStatus === 'connected') {
+        await handleCloudBackup();
+      }
       
-      const cloudData = await cloudStorage.downloadFromCloud();
-      if (cloudData) {
-        // Restore products
-        if (cloudData.products) {
-          database.importDatabase({
-            products: cloudData.products,
-            heroProducts: cloudData.heroProducts || [],
-            lastUpdated: cloudData.timestamp
-          });
-        }
-
-        // Restore contacts
-        if (cloudData.contacts) {
-          localStorage.setItem('solestyle_contacts', JSON.stringify(cloudData.contacts));
-        }
-
-        // Restore users
-        if ((cloudData as any).users) {
-          userDatabase.importUserData({ users: (cloudData as any).users });
-        }
-
-        // Reload all data
-        loadAllData();
-        
-        setCloudStatus('connected');
-        setHasUnsavedChanges(false);
-        
-        alert('Data successfully restored from cloud!');
-      }
+      alert('All changes saved successfully!');
     } catch (error) {
-      console.error('Cloud download error:', error);
-      setCloudStatus('disconnected');
-      alert('Failed to download from cloud. Please try again.');
+      console.error('Error saving changes:', error);
+      alert('Error saving changes. Please try again.');
     }
-  };
-
-  const handleExportData = () => {
-    const exportData = {
-      products: database.getAllProducts(),
-      heroProducts: database.getHeroProducts(),
-      contacts: JSON.parse(localStorage.getItem('solestyle_contacts') || '[]'),
-      users: userDatabase.getAllUsers(),
-      exportDate: new Date().toISOString(),
-      version: '1.0'
-    };
-
-    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `solestyle_backup_${new Date().toISOString().split('T')[0]}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  const handleImportData = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const importData = JSON.parse(e.target?.result as string);
-        
-        if (confirm('This will replace all current data. Are you sure?')) {
-          // Import products
-          if (importData.products) {
-            database.importDatabase({
-              products: importData.products,
-              heroProducts: importData.heroProducts || [],
-              lastUpdated: importData.exportDate || new Date().toISOString()
-            });
-          }
-
-          // Import contacts
-          if (importData.contacts) {
-            localStorage.setItem('solestyle_contacts', JSON.stringify(importData.contacts));
-          }
-
-          // Import users
-          if (importData.users) {
-            userDatabase.importUserData({ users: importData.users });
-          }
-
-          loadAllData();
-          alert('Data imported successfully!');
-        }
-      } catch (error) {
-        console.error('Import error:', error);
-        alert('Error importing data. Please check the file format.');
-      }
-    };
-    reader.readAsText(file);
   };
 
   const getSubcategories = (categoryId: string) => {
@@ -365,19 +285,23 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
 
   // Filter products based on current filters
   const filteredProducts = products.filter(product => {
+    // Search filter
     if (searchQuery && !product.name.toLowerCase().includes(searchQuery.toLowerCase()) &&
         !product.description.toLowerCase().includes(searchQuery.toLowerCase())) {
       return false;
     }
 
+    // Category filter
     if (categoryFilter !== 'all' && product.category !== categoryFilter) {
       return false;
     }
 
+    // Price range filter
     if (product.price < priceRangeFilter[0] || product.price > priceRangeFilter[1]) {
       return false;
     }
 
+    // Size filter
     if (sizeFilter !== 'all' && !product.sizes.includes(sizeFilter)) {
       return false;
     }
@@ -392,13 +316,13 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
     setSizeFilter('all');
   };
 
-  const ProductForm = ({ 
-    product, 
-    onChange, 
-    isNew = false 
-  }: { 
-    product: any, 
-    onChange: (field: string, value: any) => void,
+  const handleInputChange = (field: string, value: any, product: Partial<Product>, onChange: (product: Partial<Product>) => void) => {
+    onChange({ ...product, [field]: value });
+  };
+
+  const ProductForm = ({ product, onChange, isNew = false }: { 
+    product: Partial<Product>, 
+    onChange: (product: Partial<Product>) => void,
     isNew?: boolean 
   }) => (
     <div className="space-y-4">
@@ -409,11 +333,12 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
           </label>
           <input
             type="text"
-            value={isNew ? product.name : product.name || ''}
-            onChange={(e) => onChange('name', e.target.value)}
+            value={product.name || ''}
+            onChange={(e) => handleInputChange('name', e.target.value, product, onChange)}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             required
-            placeholder="Enter product name"
+            autoComplete="off"
+            spellCheck="false"
           />
         </div>
         <div>
@@ -423,11 +348,11 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
           <input
             type="number"
             step="0.01"
-            value={isNew ? product.price : product.price || ''}
-            onChange={(e) => onChange('price', isNew ? e.target.value : parseFloat(e.target.value) || 0)}
+            value={product.price || ''}
+            onChange={(e) => handleInputChange('price', parseFloat(e.target.value) || 0, product, onChange)}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             required
-            placeholder="0.00"
+            autoComplete="off"
           />
         </div>
       </div>
@@ -440,10 +365,10 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
           <input
             type="number"
             step="0.01"
-            value={isNew ? product.originalPrice : product.originalPrice || ''}
-            onChange={(e) => onChange('originalPrice', isNew ? e.target.value : parseFloat(e.target.value) || undefined)}
+            value={product.originalPrice || ''}
+            onChange={(e) => handleInputChange('originalPrice', parseFloat(e.target.value) || undefined, product, onChange)}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            placeholder="0.00"
+            autoComplete="off"
           />
         </div>
         <div>
@@ -455,10 +380,10 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
             step="0.1"
             min="0"
             max="5"
-            value={isNew ? product.rating : product.rating || ''}
-            onChange={(e) => onChange('rating', isNew ? e.target.value : parseFloat(e.target.value) || 0)}
+            value={product.rating || ''}
+            onChange={(e) => handleInputChange('rating', parseFloat(e.target.value) || 0, product, onChange)}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            placeholder="4.5"
+            autoComplete="off"
           />
         </div>
       </div>
@@ -469,11 +394,12 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
         </label>
         <input
           type="url"
-          value={isNew ? product.image : product.image || ''}
-          onChange={(e) => onChange('image', e.target.value)}
+          value={product.image || ''}
+          onChange={(e) => handleInputChange('image', e.target.value, product, onChange)}
           className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           placeholder="https://example.com/image.jpg"
           required
+          autoComplete="off"
         />
       </div>
 
@@ -483,12 +409,15 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
             Category *
           </label>
           <select
-            value={isNew ? product.category : product.category || ''}
+            value={product.category || ''}
             onChange={(e) => {
               const category = e.target.value;
               const subcategories = getSubcategories(category);
-              onChange('category', category);
-              onChange('subcategory', subcategories[0]?.id || '');
+              onChange({ 
+                ...product, 
+                category,
+                subcategory: subcategories[0]?.id || ''
+              });
             }}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             required
@@ -503,12 +432,12 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
             Subcategory *
           </label>
           <select
-            value={isNew ? product.subcategory : product.subcategory || ''}
-            onChange={(e) => onChange('subcategory', e.target.value)}
+            value={product.subcategory || ''}
+            onChange={(e) => handleInputChange('subcategory', e.target.value, product, onChange)}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             required
           >
-            {getSubcategories(isNew ? product.category : product.category || 'luxurious').map(sub => (
+            {getSubcategories(product.category || 'luxurious').map(sub => (
               <option key={sub.id} value={sub.id}>{sub.name}</option>
             ))}
           </select>
@@ -520,11 +449,12 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
           Description
         </label>
         <textarea
-          value={isNew ? product.description : product.description || ''}
-          onChange={(e) => onChange('description', e.target.value)}
+          value={product.description || ''}
+          onChange={(e) => handleInputChange('description', e.target.value, product, onChange)}
           className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           rows={3}
-          placeholder="Product description..."
+          autoComplete="off"
+          spellCheck="false"
         />
       </div>
 
@@ -535,10 +465,11 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
           </label>
           <input
             type="text"
-            value={isNew ? product.sizes : (Array.isArray(product.sizes) ? product.sizes.join(', ') : '')}
-            onChange={(e) => onChange('sizes', isNew ? e.target.value : e.target.value.split(',').map(s => s.trim()).filter(s => s))}
+            value={product.sizes?.join(', ') || ''}
+            onChange={(e) => handleInputChange('sizes', e.target.value.split(',').map(s => s.trim()).filter(s => s), product, onChange)}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             placeholder="7, 8, 9, 10, 11, 12"
+            autoComplete="off"
           />
         </div>
         <div>
@@ -547,10 +478,11 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
           </label>
           <input
             type="text"
-            value={isNew ? product.colors : (Array.isArray(product.colors) ? product.colors.join(', ') : '')}
-            onChange={(e) => onChange('colors', isNew ? e.target.value : e.target.value.split(',').map(c => c.trim()).filter(c => c))}
+            value={product.colors?.join(', ') || ''}
+            onChange={(e) => handleInputChange('colors', e.target.value.split(',').map(c => c.trim()).filter(c => c), product, onChange)}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             placeholder="Black, White, Brown"
+            autoComplete="off"
           />
         </div>
       </div>
@@ -559,8 +491,8 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
         <label className="flex items-center">
           <input
             type="checkbox"
-            checked={isNew ? product.inStock : product.inStock || false}
-            onChange={(e) => onChange('inStock', e.target.checked)}
+            checked={product.inStock || false}
+            onChange={(e) => handleInputChange('inStock', e.target.checked, product, onChange)}
             className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
           />
           <span className="ml-2 text-sm text-gray-700">In Stock</span>
@@ -571,10 +503,10 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
           </label>
           <input
             type="number"
-            value={isNew ? product.reviews : product.reviews || ''}
-            onChange={(e) => onChange('reviews', isNew ? e.target.value : parseInt(e.target.value) || 0)}
+            value={product.reviews || ''}
+            onChange={(e) => handleInputChange('reviews', parseInt(e.target.value) || 0, product, onChange)}
             className="w-20 border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            placeholder="0"
+            autoComplete="off"
           />
         </div>
       </div>
@@ -597,21 +529,25 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
               <p className="text-purple-100 mt-1">Manage products, users, and cloud storage</p>
             </div>
             <div className="flex items-center space-x-4">
-              <div className={`flex items-center space-x-2 px-3 py-1 rounded-full ${
-                cloudStatus === 'connected' ? 'bg-green-500/20 text-green-100' :
-                cloudStatus === 'syncing' ? 'bg-yellow-500/20 text-yellow-100' :
-                'bg-red-500/20 text-red-100'
-              }`}>
-                <Cloud size={16} />
-                <span className="text-sm capitalize">{cloudStatus}</span>
+              {/* Cloud Status Indicator */}
+              <div className="flex items-center space-x-2 bg-white/20 backdrop-blur-sm rounded-lg px-3 py-2">
+                {cloudStatus === 'connected' && <Cloud size={20} className="text-green-400" />}
+                {cloudStatus === 'disconnected' && <CloudOff size={20} className="text-red-400" />}
+                {cloudStatus === 'syncing' && <Cloud size={20} className="text-yellow-400 animate-pulse" />}
+                <span className="text-white text-sm">
+                  {cloudStatus === 'connected' && 'Cloud Connected'}
+                  {cloudStatus === 'disconnected' && 'Cloud Disconnected'}
+                  {cloudStatus === 'syncing' && 'Syncing...'}
+                </span>
               </div>
+              
               {hasUnsavedChanges && (
                 <button
-                  onClick={handleCloudUpload}
+                  onClick={handleSaveChanges}
                   className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center space-x-2 animate-pulse"
                 >
                   <Save size={20} />
-                  <span>Backup to Cloud</span>
+                  <span>Save All Changes</span>
                 </button>
               )}
             </div>
@@ -619,34 +555,66 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
         </div>
 
         <div className="flex border-b border-gray-200">
-          {[
-            { id: 'products', label: 'Products', icon: Database, count: products.length },
-            { id: 'hero', label: 'Hero Section', icon: Star, count: heroProducts.length },
-            { id: 'cloud', label: 'Cloud Storage', icon: Cloud },
-            { id: 'users', label: 'Users', icon: Users, count: users.length },
-            { id: 'contacts', label: 'Messages', icon: MessageSquare, count: contacts.length }
-          ].map(tab => {
-            const IconComponent = tab.icon;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
-                className={`flex items-center space-x-2 px-6 py-3 font-medium transition-colors ${
-                  activeTab === tab.id
-                    ? 'text-purple-600 border-b-2 border-purple-600'
-                    : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                <IconComponent size={18} />
-                <span>{tab.label}</span>
-                {tab.count !== undefined && (
-                  <span className="bg-gray-200 text-gray-700 px-2 py-1 rounded-full text-xs">
-                    {tab.count}
-                  </span>
-                )}
-              </button>
-            );
-          })}
+          <button
+            onClick={() => setActiveTab('products')}
+            className={`px-6 py-3 font-medium transition-colors ${
+              activeTab === 'products'
+                ? 'text-purple-600 border-b-2 border-purple-600'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Products ({products.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('hero')}
+            className={`px-6 py-3 font-medium transition-colors ${
+              activeTab === 'hero'
+                ? 'text-purple-600 border-b-2 border-purple-600'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Hero Section
+          </button>
+          <button
+            onClick={() => setActiveTab('users')}
+            className={`px-6 py-3 font-medium transition-colors ${
+              activeTab === 'users'
+                ? 'text-purple-600 border-b-2 border-purple-600'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Users ({users.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('contacts')}
+            className={`px-6 py-3 font-medium transition-colors ${
+              activeTab === 'contacts'
+                ? 'text-purple-600 border-b-2 border-purple-600'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Messages ({contacts.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('analytics')}
+            className={`px-6 py-3 font-medium transition-colors ${
+              activeTab === 'analytics'
+                ? 'text-purple-600 border-b-2 border-purple-600'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Analytics
+          </button>
+          <button
+            onClick={() => setActiveTab('cloud')}
+            className={`px-6 py-3 font-medium transition-colors ${
+              activeTab === 'cloud'
+                ? 'text-purple-600 border-b-2 border-purple-600'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Cloud Storage
+          </button>
         </div>
 
         <div className="p-6 max-h-[70vh] overflow-y-auto">
@@ -678,8 +646,11 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
               {showFilters && (
                 <div className="bg-gray-50 rounded-lg p-6 mb-6">
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {/* Search */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Search Products</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Search Products
+                      </label>
                       <div className="relative">
                         <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={16} />
                         <input
@@ -692,8 +663,11 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                       </div>
                     </div>
 
+                    {/* Category Filter */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Category</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Category
+                      </label>
                       <select
                         value={categoryFilter}
                         onChange={(e) => setCategoryFilter(e.target.value)}
@@ -706,8 +680,11 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                       </select>
                     </div>
 
+                    {/* Size Filter */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Size</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Size
+                      </label>
                       <select
                         value={sizeFilter}
                         onChange={(e) => setSizeFilter(e.target.value)}
@@ -720,8 +697,11 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                       </select>
                     </div>
 
+                    {/* Price Range */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Price Range</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Price Range
+                      </label>
                       <div className="flex space-x-2">
                         <input
                           type="number"
@@ -760,7 +740,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                   <h4 className="text-lg font-semibold mb-4 text-green-800">Add New Product</h4>
                   <ProductForm 
                     product={newProduct} 
-                    onChange={handleNewProductChange}
+                    onChange={setNewProduct}
                     isNew={true}
                   />
                   <div className="flex space-x-3 mt-6">
@@ -769,7 +749,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                       className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-medium transition-colors flex items-center space-x-2"
                     >
                       <Save size={18} />
-                      <span>Add Product</span>
+                      <span>Add Product to Database</span>
                     </button>
                     <button
                       onClick={() => setIsAddingProduct(false)}
@@ -786,7 +766,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                   <h4 className="text-lg font-semibold mb-4 text-blue-800">Edit Product</h4>
                   <ProductForm 
                     product={editingProduct} 
-                    onChange={handleEditProductChange}
+                    onChange={setEditingProduct}
                   />
                   <div className="flex space-x-3 mt-6">
                     <button
@@ -927,7 +907,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                 <div className="flex items-center">
                   <Eye className="text-green-600 mr-2" size={20} />
                   <span className="text-green-800 font-medium">
-                    Changes will be reflected on the homepage hero section after saving to cloud.
+                    Changes will be reflected on the homepage hero section immediately.
                   </span>
                 </div>
               </div>
@@ -939,191 +919,116 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
               <h3 className="text-xl font-semibold mb-6">Cloud Storage Management</h3>
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                <div className="bg-gray-50 rounded-lg p-6">
-                  <h4 className="font-semibold mb-4 flex items-center">
-                    <Cloud className="mr-2" size={20} />
-                    Cloud Backup
-                  </h4>
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <span>Status:</span>
-                      <span className={`px-2 py-1 rounded-full text-sm ${
-                        cloudStatus === 'connected' ? 'bg-green-100 text-green-800' :
-                        cloudStatus === 'syncing' ? 'bg-yellow-100 text-yellow-800' :
-                        'bg-red-100 text-red-800'
-                      }`}>
-                        {cloudStatus === 'connected' ? 'Connected' :
-                         cloudStatus === 'syncing' ? 'Syncing...' :
-                         'Disconnected'}
+                {/* Cloud Status Card */}
+                <div className="bg-white border border-gray-200 rounded-lg p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="text-lg font-semibold">Cloud Status</h4>
+                    <div className={`px-3 py-1 rounded-full text-sm font-medium ${
+                      cloudStatus === 'connected' ? 'bg-green-100 text-green-800' :
+                      cloudStatus === 'syncing' ? 'bg-yellow-100 text-yellow-800' :
+                      'bg-red-100 text-red-800'
+                    }`}>
+                      {cloudStatus === 'connected' && 'Connected'}
+                      {cloudStatus === 'disconnected' && 'Disconnected'}
+                      {cloudStatus === 'syncing' && 'Syncing...'}
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-3">
+                    <div className="flex items-center space-x-3">
+                      {cloudStatus === 'connected' ? (
+                        <Cloud size={20} className="text-green-600" />
+                      ) : cloudStatus === 'syncing' ? (
+                        <Cloud size={20} className="text-yellow-600 animate-pulse" />
+                      ) : (
+                        <CloudOff size={20} className="text-red-600" />
+                      )}
+                      <span className="text-gray-700">
+                        {cloudStatus === 'connected' && 'Cloud backup is available and up to date'}
+                        {cloudStatus === 'disconnected' && 'No cloud backup found or connection failed'}
+                        {cloudStatus === 'syncing' && 'Synchronizing with cloud storage...'}
                       </span>
                     </div>
-                    {lastBackup && (
-                      <div className="flex items-center justify-between">
-                        <span>Last Backup:</span>
-                        <span className="text-sm text-gray-600">
-                          {new Date(lastBackup).toLocaleString()}
-                        </span>
+                    
+                    {cloudBackupInfo && (
+                      <div className="bg-gray-50 rounded-lg p-3">
+                        <p className="text-sm text-gray-600">
+                          <strong>Last Backup:</strong> {new Date(cloudBackupInfo.lastModified).toLocaleString()}
+                        </p>
+                        <p className="text-sm text-gray-600">
+                          <strong>Size:</strong> {(cloudBackupInfo.size / 1024).toFixed(2)} KB
+                        </p>
                       </div>
                     )}
-                    <div className="flex space-x-2">
-                      <button
-                        onClick={handleCloudUpload}
-                        disabled={cloudStatus === 'syncing'}
-                        className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center justify-center space-x-2"
-                      >
-                        <Upload size={18} />
-                        <span>Upload Now</span>
-                      </button>
-                      <button
-                        onClick={handleCloudDownload}
-                        disabled={cloudStatus === 'syncing'}
-                        className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center justify-center space-x-2"
-                      >
-                        <Download size={18} />
-                        <span>Download & Restore</span>
-                      </button>
-                    </div>
                   </div>
                 </div>
 
-                <div className="bg-gray-50 rounded-lg p-6">
-                  <h4 className="font-semibold mb-4 flex items-center">
-                    <Settings className="mr-2" size={20} />
-                    Local Backup
-                  </h4>
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <span>Auto Backup:</span>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={autoBackup}
-                          onChange={(e) => setAutoBackup(e.target.checked)}
-                          className="sr-only peer"
-                        />
-                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                      </label>
-                    </div>
-                    <div className="flex space-x-2">
-                      <button
-                        onClick={handleExportData}
-                        className="flex-1 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center justify-center space-x-2"
-                      >
-                        <Download size={18} />
-                        <span>Export Data</span>
-                      </button>
-                      <label className="flex-1 bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center justify-center space-x-2 cursor-pointer">
-                        <Upload size={18} />
-                        <span>Import Data</span>
-                        <input
-                          type="file"
-                          accept=".json"
-                          onChange={handleImportData}
-                          className="hidden"
-                        />
-                      </label>
-                    </div>
+                {/* Cloud Actions Card */}
+                <div className="bg-white border border-gray-200 rounded-lg p-6">
+                  <h4 className="text-lg font-semibold mb-4">Cloud Actions</h4>
+                  
+                  <div className="space-y-3">
+                    <button
+                      onClick={handleCloudBackup}
+                      disabled={cloudStatus === 'syncing'}
+                      className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-4 py-3 rounded-lg font-medium transition-colors flex items-center justify-center space-x-2"
+                    >
+                      <Upload size={18} />
+                      <span>Backup to Cloud</span>
+                    </button>
+                    
+                    <button
+                      onClick={handleCloudRestore}
+                      disabled={cloudStatus === 'syncing' || cloudStatus === 'disconnected'}
+                      className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white px-4 py-3 rounded-lg font-medium transition-colors flex items-center justify-center space-x-2"
+                    >
+                      <Download size={18} />
+                      <span>Restore from Cloud</span>
+                    </button>
+                    
+                    <button
+                      onClick={checkCloudStatus}
+                      disabled={cloudStatus === 'syncing'}
+                      className="w-full bg-gray-600 hover:bg-gray-700 disabled:bg-gray-400 text-white px-4 py-3 rounded-lg font-medium transition-colors flex items-center justify-center space-x-2"
+                    >
+                      <Cloud size={18} />
+                      <span>Check Status</span>
+                    </button>
                   </div>
                 </div>
               </div>
 
+              {/* Cloud Storage Info */}
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
-                <h4 className="font-semibold text-blue-800 mb-2">Cloud Storage Information</h4>
-                <p className="text-blue-700 text-sm mb-4">
-                  Your data is automatically backed up to secure cloud storage. This includes all products, 
-                  user data, contact messages, and settings. You can restore your data from any device.
-                </p>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                  <div className="bg-white p-3 rounded-lg">
-                    <div className="font-medium text-gray-900">Products</div>
-                    <div className="text-gray-600">{products.length} items</div>
-                  </div>
-                  <div className="bg-white p-3 rounded-lg">
-                    <div className="font-medium text-gray-900">Users</div>
-                    <div className="text-gray-600">{users.length} registered</div>
-                  </div>
-                  <div className="bg-white p-3 rounded-lg">
-                    <div className="font-medium text-gray-900">Messages</div>
-                    <div className="text-gray-600">{contacts.length} contacts</div>
-                  </div>
+                <h4 className="text-lg font-semibold text-blue-800 mb-4">About Cloud Storage</h4>
+                <div className="space-y-3 text-blue-700">
+                  <p>
+                    <strong>Demo Mode:</strong> This demo uses localStorage as mock cloud storage. 
+                    In production, this would integrate with services like Google Drive, AWS S3, or Firebase.
+                  </p>
+                  <p>
+                    <strong>What gets backed up:</strong> All products, hero section settings, user data, and contact messages.
+                  </p>
+                  <p>
+                    <strong>Automatic Backup:</strong> Data is automatically backed up when you save changes (if cloud is connected).
+                  </p>
+                  <p>
+                    <strong>Data Safety:</strong> Always backup your data before making major changes.
+                  </p>
                 </div>
               </div>
             </div>
           )}
 
+          {/* Other tabs remain the same... */}
           {activeTab === 'users' && (
             <div>
               <h3 className="text-xl font-semibold mb-6">User Management</h3>
-              
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-                <div className="bg-blue-50 p-4 rounded-lg">
-                  <div className="text-2xl font-bold text-blue-600">{users.length}</div>
-                  <div className="text-sm text-blue-800">Total Users</div>
-                </div>
-                <div className="bg-green-50 p-4 rounded-lg">
-                  <div className="text-2xl font-bold text-green-600">
-                    {users.filter(u => u.isActive).length}
-                  </div>
-                  <div className="text-sm text-green-800">Active Users</div>
-                </div>
-                <div className="bg-purple-50 p-4 rounded-lg">
-                  <div className="text-2xl font-bold text-purple-600">
-                    {users.filter(u => new Date(u.registrationDate) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)).length}
-                  </div>
-                  <div className="text-sm text-purple-800">New This Week</div>
-                </div>
-                <div className="bg-orange-50 p-4 rounded-lg">
-                  <div className="text-2xl font-bold text-orange-600">
-                    {users.filter(u => u.orderHistory.length > 0).length}
-                  </div>
-                  <div className="text-sm text-orange-800">With Orders</div>
-                </div>
-              </div>
-
-              <div className="bg-white rounded-lg shadow overflow-hidden">
-                <div className="px-6 py-4 border-b border-gray-200">
-                  <h4 className="font-semibold">Registered Users</h4>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Registration</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Login</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Style</th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {users.map(user => (
-                        <tr key={user.id}>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div>
-                              <div className="text-sm font-medium text-gray-900">{user.name}</div>
-                              <div className="text-sm text-gray-500">{user.email}</div>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            {new Date(user.registrationDate).toLocaleDateString()}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            {user.lastLogin ? new Date(user.lastLogin).toLocaleDateString() : 'Never'}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className={`px-2 py-1 text-xs rounded-full ${
-                              user.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                            }`}>
-                              {user.isActive ? 'Active' : 'Inactive'}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            {user.stylePreference || 'Not set'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              <div className="bg-white border border-gray-200 rounded-lg p-6">
+                <p className="text-gray-600">User management features coming soon...</p>
+                <div className="mt-4">
+                  <p className="text-sm text-gray-500">Total Users: {users.length}</p>
+                  <p className="text-sm text-gray-500">Active Users: {userStats.activeUsers || 0}</p>
                 </div>
               </div>
             </div>
@@ -1132,33 +1037,79 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
           {activeTab === 'contacts' && (
             <div>
               <h3 className="text-xl font-semibold mb-6">Contact Messages</h3>
-              
               <div className="space-y-4">
                 {contacts.length === 0 ? (
-                  <div className="text-center py-12 text-gray-500">
-                    No contact messages yet.
+                  <div className="bg-white border border-gray-200 rounded-lg p-6 text-center">
+                    <MessageSquare size={48} className="text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-600">No contact messages yet.</p>
                   </div>
                 ) : (
                   contacts.map(contact => (
                     <div key={contact.id} className="bg-white border border-gray-200 rounded-lg p-6">
-                      <div className="flex items-start justify-between mb-4">
+                      <div className="flex justify-between items-start mb-3">
                         <div>
                           <h4 className="font-semibold text-gray-900">{contact.name}</h4>
                           <p className="text-sm text-gray-600">{contact.email}</p>
-                          <p className="text-xs text-gray-500 mt-1">
-                            {new Date(contact.timestamp).toLocaleString()}
-                          </p>
                         </div>
-                        <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs">
-                          {contact.subject}
+                        <span className="text-xs text-gray-500">
+                          {new Date(contact.timestamp).toLocaleString()}
                         </span>
                       </div>
-                      <div className="bg-gray-50 rounded-lg p-4">
-                        <p className="text-gray-700">{contact.message}</p>
-                      </div>
+                      <p className="text-sm text-gray-700 mb-2">
+                        <strong>Subject:</strong> {contact.subject}
+                      </p>
+                      <p className="text-gray-700">{contact.message}</p>
                     </div>
                   ))
                 )}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'analytics' && (
+            <div>
+              <h3 className="text-xl font-semibold mb-6">Analytics Dashboard</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div className="bg-white border border-gray-200 rounded-lg p-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-gray-600">Total Products</p>
+                      <p className="text-2xl font-bold text-gray-900">{products.length}</p>
+                    </div>
+                    <BarChart3 className="text-blue-600" size={32} />
+                  </div>
+                </div>
+                <div className="bg-white border border-gray-200 rounded-lg p-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-gray-600">Total Users</p>
+                      <p className="text-2xl font-bold text-gray-900">{users.length}</p>
+                    </div>
+                    <Users className="text-green-600" size={32} />
+                  </div>
+                </div>
+                <div className="bg-white border border-gray-200 rounded-lg p-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-gray-600">Messages</p>
+                      <p className="text-2xl font-bold text-gray-900">{contacts.length}</p>
+                    </div>
+                    <MessageSquare className="text-purple-600" size={32} />
+                  </div>
+                </div>
+                <div className="bg-white border border-gray-200 rounded-lg p-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-gray-600">Cloud Status</p>
+                      <p className="text-sm font-bold text-gray-900 capitalize">{cloudStatus}</p>
+                    </div>
+                    {cloudStatus === 'connected' ? (
+                      <Cloud className="text-green-600" size={32} />
+                    ) : (
+                      <CloudOff className="text-red-600" size={32} />
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           )}
