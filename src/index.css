@@ -1,0 +1,33 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #F5F5F5;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #5D3A8D;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #2C2A29;
+}
+
+/* Remove all animations and transitions for a calm, static design */
+*, *::before, *::after {
+  animation: none !important;
+  transition: none !important;
+  transform: none !important;
+}
+
+/* Smooth scrolling only */
+html {
+  scroll-behavior: smooth;
+}
