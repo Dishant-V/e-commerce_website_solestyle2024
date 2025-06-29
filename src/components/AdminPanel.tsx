@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit, Trash2, Save, X, Upload, Star, Eye, Filter, Search, Cloud, CloudOff, Download, Users, MessageSquare, BarChart3, Settings } from 'lucide-react';
+import { Plus, Edit, Trash2, Save, X, Upload, Star, Eye, Filter, Search, Cloud, CloudOff, Download, Users, MessageSquare, BarChart3, Settings, RefreshCw } from 'lucide-react';
 import { Product, Category } from '../types';
 import { categories } from '../data/products';
 import { database } from '../utils/database';
@@ -22,6 +22,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
   const [users, setUsers] = useState<any[]>([]);
   const [contacts, setContacts] = useState<any[]>([]);
   const [userStats, setUserStats] = useState<any>({});
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Filter states
   const [searchQuery, setSearchQuery] = useState('');
@@ -52,25 +53,44 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
   }, []);
 
   const loadAllData = () => {
-    // Load products
-    const allProducts = database.getAllProducts();
-    setProducts(allProducts);
+    try {
+      // Load products
+      const allProducts = database.getAllProducts();
+      console.log(`AdminPanel: Loaded ${allProducts.length} products`);
+      setProducts(allProducts);
 
-    // Load hero products
-    const heroIds = database.getHeroProducts();
-    setHeroProducts(heroIds);
+      // Load hero products
+      const heroIds = database.getHeroProducts();
+      setHeroProducts(heroIds);
 
-    // Load users
-    const allUsers = getAllUsers();
-    setUsers(allUsers);
+      // Load users
+      const allUsers = getAllUsers();
+      setUsers(allUsers);
 
-    // Load user stats
-    const stats = getUserStats();
-    setUserStats(stats);
+      // Load user stats
+      const stats = getUserStats();
+      setUserStats(stats);
 
-    // Load contacts
-    const savedContacts = JSON.parse(localStorage.getItem('solestyle_contacts') || '[]');
-    setContacts(savedContacts);
+      // Load contacts
+      const savedContacts = JSON.parse(localStorage.getItem('solestyle_contacts') || '[]');
+      setContacts(savedContacts);
+    } catch (error) {
+      console.error('Error loading admin data:', error);
+    }
+  };
+
+  const handleRefreshData = async () => {
+    setIsRefreshing(true);
+    try {
+      // Force reload from storage
+      database.reloadFromStorage();
+      loadAllData();
+      await new Promise(resolve => setTimeout(resolve, 500)); // Small delay for UX
+    } catch (error) {
+      console.error('Error refreshing data:', error);
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   const checkCloudStatus = async () => {
@@ -177,6 +197,9 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
       };
 
       const addedProduct = database.addProduct(productData);
+      console.log('Product added successfully:', addedProduct);
+      
+      // Refresh products list
       setProducts(database.getAllProducts());
       
       setIsAddingProduct(false);
@@ -196,7 +219,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
       });
       setHasUnsavedChanges(true);
       
-      alert('Product added successfully!');
+      alert(`Product "${addedProduct.name}" added successfully! It should now appear on the website.`);
     } catch (error) {
       console.error('Error adding product:', error);
       alert('Failed to add product. Please try again.');
@@ -211,12 +234,16 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
     if (!editingProduct) return;
 
     try {
-      database.updateProduct(editingProduct.id, editingProduct);
-      setProducts(database.getAllProducts());
-      setEditingProduct(null);
-      setHasUnsavedChanges(true);
-      
-      alert('Product updated successfully!');
+      const updatedProduct = database.updateProduct(editingProduct.id, editingProduct);
+      if (updatedProduct) {
+        console.log('Product updated successfully:', updatedProduct);
+        setProducts(database.getAllProducts());
+        setEditingProduct(null);
+        setHasUnsavedChanges(true);
+        alert(`Product "${updatedProduct.name}" updated successfully!`);
+      } else {
+        throw new Error('Product not found');
+      }
     } catch (error) {
       console.error('Error updating product:', error);
       alert('Failed to update product. Please try again.');
@@ -224,18 +251,29 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
   };
 
   const handleDeleteProduct = (productId: string) => {
-    if (confirm('Are you sure you want to delete this product?')) {
+    const productToDelete = products.find(p => p.id === productId);
+    if (!productToDelete) {
+      alert('Product not found');
+      return;
+    }
+
+    if (confirm(`Are you sure you want to delete "${productToDelete.name}"?`)) {
       try {
-        database.deleteProduct(productId);
-        setProducts(database.getAllProducts());
-        
-        // Remove from hero products if it's there
-        const updatedHeroProducts = heroProducts.filter(id => id !== productId);
-        setHeroProducts(updatedHeroProducts);
-        database.updateHeroProducts(updatedHeroProducts);
-        
-        setHasUnsavedChanges(true);
-        alert('Product deleted successfully!');
+        const success = database.deleteProduct(productId);
+        if (success) {
+          console.log('Product deleted successfully:', productId);
+          setProducts(database.getAllProducts());
+          
+          // Remove from hero products if it's there
+          const updatedHeroProducts = heroProducts.filter(id => id !== productId);
+          setHeroProducts(updatedHeroProducts);
+          database.updateHeroProducts(updatedHeroProducts);
+          
+          setHasUnsavedChanges(true);
+          alert(`Product "${productToDelete.name}" deleted successfully!`);
+        } else {
+          throw new Error('Failed to delete product');
+        }
       } catch (error) {
         console.error('Error deleting product:', error);
         alert('Failed to delete product. Please try again.');
@@ -249,6 +287,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
     setHeroProducts(newHeroProducts);
     database.updateHeroProducts(newHeroProducts);
     setHasUnsavedChanges(true);
+    console.log('Hero products updated:', newHeroProducts);
   };
 
   const handleSaveChanges = async () => {
@@ -529,6 +568,17 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
               <p className="text-purple-100 mt-1">Manage products, users, and cloud storage</p>
             </div>
             <div className="flex items-center space-x-4">
+              {/* Refresh Button */}
+              <button
+                onClick={handleRefreshData}
+                disabled={isRefreshing}
+                className="bg-white/20 backdrop-blur-sm rounded-lg px-3 py-2 text-white hover:bg-white/30 transition-colors flex items-center space-x-2"
+                title="Refresh data from database"
+              >
+                <RefreshCw size={16} className={isRefreshing ? 'animate-spin' : ''} />
+                <span className="text-sm">Refresh</span>
+              </button>
+
               {/* Cloud Status Indicator */}
               <div className="flex items-center space-x-2 bg-white/20 backdrop-blur-sm rounded-lg px-3 py-2">
                 {cloudStatus === 'connected' && <Cloud size={20} className="text-green-400" />}
@@ -828,13 +878,20 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
 
               {filteredProducts.length === 0 && (
                 <div className="text-center py-12">
-                  <p className="text-gray-500 text-lg">No products found matching your criteria.</p>
-                  <button
-                    onClick={clearFilters}
-                    className="mt-4 bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded-lg font-medium"
-                  >
-                    Clear Filters
-                  </button>
+                  <p className="text-gray-500 text-lg mb-4">
+                    {products.length === 0 
+                      ? 'No products in database. Add some products to get started!' 
+                      : 'No products found matching your criteria.'
+                    }
+                  </p>
+                  {products.length > 0 && (
+                    <button
+                      onClick={clearFilters}
+                      className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded-lg font-medium"
+                    >
+                      Clear Filters
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -893,7 +950,9 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                                     </span>
                                   </div>
                                 </div>
-                              ) : null;
+                              ) : (
+                                <p className="text-gray-500 text-sm">Product not found</p>
+                              );
                             })()}
                           </div>
                         )}

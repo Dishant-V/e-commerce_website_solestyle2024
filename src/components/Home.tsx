@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowRight, Truck, Shield, RotateCcw, Star, Zap, Crown, Sparkles } from 'lucide-react';
-import { database } from '../utils/database';
+import { database, onProductsUpdated, offProductsUpdated } from '../utils/database';
 import ProductCard from './ProductCard';
 import { Product } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -14,13 +14,34 @@ interface HomeProps {
 const Home: React.FC<HomeProps> = ({ onProductClick, onCategoryChange, onAuthRequired }) => {
   const [products, setProducts] = useState<Product[]>([]);
   const [featuredProducts, setFeaturedProducts] = useState<Product[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const { user } = useAuth();
 
-  // Load products from database
+  // Load products from database and set up real-time updates
   useEffect(() => {
-    const allProducts = database.getAllProducts();
-    setProducts(allProducts);
-    setFeaturedProducts(allProducts.slice(0, 6));
+    const loadProducts = () => {
+      try {
+        const allProducts = database.getAllProducts();
+        console.log(`Home: Loaded ${allProducts.length} products`);
+        setProducts(allProducts);
+        setFeaturedProducts(allProducts.slice(0, 6));
+        setIsLoading(false);
+      } catch (error) {
+        console.error('Error loading products in Home:', error);
+        setIsLoading(false);
+      }
+    };
+
+    // Initial load
+    loadProducts();
+
+    // Subscribe to real-time updates
+    onProductsUpdated(loadProducts);
+
+    // Cleanup subscription
+    return () => {
+      offProductsUpdated(loadProducts);
+    };
   }, []);
 
   // Get one product from each category for hero showcase
@@ -54,16 +75,38 @@ const Home: React.FC<HomeProps> = ({ onProductClick, onCategoryChange, onAuthReq
 
   const currentCategory = categoryProducts[currentCategoryIndex];
 
-  if (!currentCategory) {
+  if (isLoading) {
     return (
       <div className="min-h-screen bg-[#F5F5F5] dark:bg-[#1a1a1a] flex items-center justify-center">
         <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-[#5D3A8D] mx-auto mb-4"></div>
           <h2 className="text-2xl font-bold text-[#2C2A29] dark:text-[#F5F5F5] mb-4">
             Loading Products...
           </h2>
           <p className="text-[#2C2A29]/60 dark:text-[#F5F5F5]/60">
             Please wait while we load the latest products from our database.
           </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentCategory) {
+    return (
+      <div className="min-h-screen bg-[#F5F5F5] dark:bg-[#1a1a1a] flex items-center justify-center">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold text-[#2C2A29] dark:text-[#F5F5F5] mb-4">
+            No Products Available
+          </h2>
+          <p className="text-[#2C2A29]/60 dark:text-[#F5F5F5]/60 mb-6">
+            Please add some products through the admin panel to get started.
+          </p>
+          <button
+            onClick={() => onCategoryChange('all')}
+            className="bg-[#5D3A8D] text-white px-6 py-3 rounded-lg font-semibold"
+          >
+            View All Products
+          </button>
         </div>
       </div>
     );
@@ -300,16 +343,24 @@ const Home: React.FC<HomeProps> = ({ onProductClick, onCategoryChange, onAuthReq
             </p>
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {featuredProducts.map(product => (
-              <ProductCard
-                key={product.id}
-                product={product}
-                onProductClick={onProductClick}
-                onAuthRequired={onAuthRequired}
-              />
-            ))}
-          </div>
+          {featuredProducts.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {featuredProducts.map(product => (
+                <ProductCard
+                  key={product.id}
+                  product={product}
+                  onProductClick={onProductClick}
+                  onAuthRequired={onAuthRequired}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-12">
+              <p className="text-[#2C2A29]/60 dark:text-[#F5F5F5]/60 text-lg">
+                No featured products available. Add some products through the admin panel.
+              </p>
+            </div>
+          )}
           
           <div className="text-center mt-10">
             <button

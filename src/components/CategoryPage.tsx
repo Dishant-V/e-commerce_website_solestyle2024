@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Filter, Grid, List } from 'lucide-react';
-import { database } from '../utils/database';
+import { database, onProductsUpdated, offProductsUpdated } from '../utils/database';
 import { categories } from '../data/products';
 import ProductCard from './ProductCard';
 import { Product } from '../types';
@@ -19,6 +19,7 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
   onAuthRequired 
 }) => {
   const [products, setProducts] = useState<Product[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [sortBy, setSortBy] = useState('name');
   const [priceRange, setPriceRange] = useState([0, 500]);
   const [selectedSizes, setSelectedSizes] = useState<string[]>([]);
@@ -26,10 +27,30 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
-  // Load products from database
+  // Load products from database and set up real-time updates
   useEffect(() => {
-    const allProducts = database.getAllProducts();
-    setProducts(allProducts);
+    const loadProducts = () => {
+      try {
+        const allProducts = database.getAllProducts();
+        console.log(`CategoryPage: Loaded ${allProducts.length} products`);
+        setProducts(allProducts);
+        setIsLoading(false);
+      } catch (error) {
+        console.error('Error loading products in CategoryPage:', error);
+        setIsLoading(false);
+      }
+    };
+
+    // Initial load
+    loadProducts();
+
+    // Subscribe to real-time updates
+    onProductsUpdated(loadProducts);
+
+    // Cleanup subscription
+    return () => {
+      offProductsUpdated(loadProducts);
+    };
   }, []);
 
   const filteredProducts = products.filter(product => {
@@ -103,6 +124,22 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
     setSelectedColors([]);
   };
 
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-[#F5F5F5] dark:bg-[#1a1a1a] flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-[#5D3A8D] mx-auto mb-4"></div>
+          <h2 className="text-2xl font-bold text-[#2C2A29] dark:text-[#F5F5F5] mb-4">
+            Loading Products...
+          </h2>
+          <p className="text-[#2C2A29]/60 dark:text-[#F5F5F5]/60">
+            Please wait while we load the latest products.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#F5F5F5] dark:bg-[#1a1a1a]">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -175,62 +212,66 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
                 </div>
 
                 {/* Sizes */}
-                <div>
-                  <label className="block text-sm font-medium text-[#2C2A29] dark:text-[#F5F5F5] mb-2">
-                    Sizes
-                  </label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {allSizes.map(size => (
-                      <label
-                        key={size}
-                        className="flex items-center space-x-2 cursor-pointer"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedSizes.includes(size)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedSizes([...selectedSizes, size]);
-                            } else {
-                              setSelectedSizes(selectedSizes.filter(s => s !== size));
-                            }
-                          }}
-                          className="rounded border-[#F5F5F5] dark:border-[#5D3A8D]/20 text-[#5D3A8D] focus:ring-[#5D3A8D]"
-                        />
-                        <span className="text-sm text-[#2C2A29] dark:text-[#F5F5F5]">{size}</span>
-                      </label>
-                    ))}
+                {allSizes.length > 0 && (
+                  <div>
+                    <label className="block text-sm font-medium text-[#2C2A29] dark:text-[#F5F5F5] mb-2">
+                      Sizes
+                    </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {allSizes.map(size => (
+                        <label
+                          key={size}
+                          className="flex items-center space-x-2 cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedSizes.includes(size)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedSizes([...selectedSizes, size]);
+                              } else {
+                                setSelectedSizes(selectedSizes.filter(s => s !== size));
+                              }
+                            }}
+                            className="rounded border-[#F5F5F5] dark:border-[#5D3A8D]/20 text-[#5D3A8D] focus:ring-[#5D3A8D]"
+                          />
+                          <span className="text-sm text-[#2C2A29] dark:text-[#F5F5F5]">{size}</span>
+                        </label>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* Colors */}
-                <div>
-                  <label className="block text-sm font-medium text-[#2C2A29] dark:text-[#F5F5F5] mb-2">
-                    Colors
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {allColors.map(color => (
-                      <label
-                        key={color}
-                        className="flex items-center space-x-2 cursor-pointer"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedColors.includes(color)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedColors([...selectedColors, color]);
-                            } else {
-                              setSelectedColors(selectedColors.filter(c => c !== color));
-                            }
-                          }}
-                          className="rounded border-[#F5F5F5] dark:border-[#5D3A8D]/20 text-[#5D3A8D] focus:ring-[#5D3A8D]"
-                        />
-                        <span className="text-sm text-[#2C2A29] dark:text-[#F5F5F5]">{color}</span>
-                      </label>
-                    ))}
+                {allColors.length > 0 && (
+                  <div>
+                    <label className="block text-sm font-medium text-[#2C2A29] dark:text-[#F5F5F5] mb-2">
+                      Colors
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {allColors.map(color => (
+                        <label
+                          key={color}
+                          className="flex items-center space-x-2 cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedColors.includes(color)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedColors([...selectedColors, color]);
+                              } else {
+                                setSelectedColors(selectedColors.filter(c => c !== color));
+                              }
+                            }}
+                            className="rounded border-[#F5F5F5] dark:border-[#5D3A8D]/20 text-[#5D3A8D] focus:ring-[#5D3A8D]"
+                          />
+                          <span className="text-sm text-[#2C2A29] dark:text-[#F5F5F5]">{color}</span>
+                        </label>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* Apply/Clear Filters */}
                 <div className="space-y-2">
@@ -265,30 +306,37 @@ const CategoryPage: React.FC<CategoryPageProps> = ({
               </div>
             </div>
 
-            <div className={`grid gap-6 ${
-              viewMode === 'grid' 
-                ? 'grid-cols-1 md:grid-cols-2 xl:grid-cols-3' 
-                : 'grid-cols-1'
-            }`}>
-              {sortedProducts.map(product => (
-                <ProductCard
-                  key={product.id}
-                  product={product}
-                  onProductClick={onProductClick}
-                  onAuthRequired={onAuthRequired}
-                />
-              ))}
-            </div>
-
-            {sortedProducts.length === 0 && (
+            {sortedProducts.length > 0 ? (
+              <div className={`grid gap-6 ${
+                viewMode === 'grid' 
+                  ? 'grid-cols-1 md:grid-cols-2 xl:grid-cols-3' 
+                  : 'grid-cols-1'
+              }`}>
+                {sortedProducts.map(product => (
+                  <ProductCard
+                    key={product.id}
+                    product={product}
+                    onProductClick={onProductClick}
+                    onAuthRequired={onAuthRequired}
+                  />
+                ))}
+              </div>
+            ) : (
               <div className="text-center py-12">
-                <p className="text-[#2C2A29]/60 dark:text-[#F5F5F5]/60 text-lg">No products found matching your criteria.</p>
-                <button
-                  onClick={clearFilters}
-                  className="mt-4 bg-[#5D3A8D] text-white px-6 py-2 rounded-lg font-medium"
-                >
-                  Clear Filters
-                </button>
+                <p className="text-[#2C2A29]/60 dark:text-[#F5F5F5]/60 text-lg mb-4">
+                  {filteredProducts.length === 0 
+                    ? 'No products found in this category.' 
+                    : 'No products found matching your criteria.'
+                  }
+                </p>
+                {filteredProducts.length > 0 && (
+                  <button
+                    onClick={clearFilters}
+                    className="bg-[#5D3A8D] text-white px-6 py-2 rounded-lg font-medium"
+                  >
+                    Clear Filters
+                  </button>
+                )}
               </div>
             )}
           </div>
