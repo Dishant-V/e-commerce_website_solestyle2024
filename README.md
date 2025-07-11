@@ -1,13 +1,13 @@
-# Shoestyle 2024 👟
+# Shoestyle 2024 
 
 
 **Shoestyle 2024** is a modern, stylish, and responsive e-commerce website built to showcase and sell shoes for all types of users. This project focuses on clean UI, intuitive navigation, and essential e-commerce functionalities like product categories, policies, and a payment gateway setup.
 
-## 🌐 Live Website
+##  Live Website
 
-🚀 [Visit Shoestyle 2024 Live](https://solestyle2024.netlify.app/)
+ [Visit Shoestyle 2024 Live](https://solestyle2024.netlify.app/)
 
-## 🛠️ Built With
+##  Built With
 
 - **HTML5**
 - **CSS3**
@@ -15,7 +15,7 @@
 - **Responsive Design**
 - **Deployed on**: Netlify
 
-## 🔑 Key Features
+##  Key Features
 
 - 🖥️ Clean and modern homepage layout
 - 🧾 Categorized product listings (Men, Women, Kids)
@@ -25,7 +25,7 @@
 - 📱 Fully mobile-responsive design
 
 
-## 📝 How It Works
+##  How It Works
 
 - The user lands on a homepage highlighting top categories and styles
 - Menu navigation allows access to categorized shoe listings and policy pages
@@ -34,20 +34,20 @@
 - Static contact page allows users to reach out for queries
 - Netlify handles frontend hosting
 
-## 🚀 Deployment
+##  Deployment
 
 The site is deployed using **Netlify**. Simply drag-and-drop your project folder or link your GitHub repo for continuous deployment.
 
-## 🤝 Contributing
+##  Contributing
 
 Pull requests are welcome! For major changes, please open an issue first to discuss your proposed changes.
 
-## 🧑‍💻 Author
+##  Author
 
 **Dishant**  
 Built with ❤️ for showcasing modern shoe styles in 2024.
 
-## 📬 Contact
+##  Contact
 
 For any queries, please contact via [LinkedIn](https://linkedin.com/) or the contact form on my [Portfolio website](https://dishants-portfolio-ykm5.onrender.com/).
 
